@@ -165,22 +165,51 @@ fn get_aes_key(properties: &[u8], password: &[u8]) -> Result<([u8; 32], [u8; 16]
         aes_key[salt_size..n + salt_size].copy_from_slice(&password[0..n]);
         aes_key
     } else {
-        let mut sha = sha2::Sha256::default();
-        let mut extra = [0u8; 8];
-        for _ in 0..(1u32 << num_cycles_power) {
-            sha.update(&salt);
-            sha.update(password);
-            sha.update(extra);
-            for item in &mut extra {
-                *item = item.wrapping_add(1);
-                if *item != 0 {
-                    break;
-                }
-            }
-        }
-        sha.finalize().into()
+        derive_key_cached(num_cycles_power, &salt, password)
     };
     Ok((aes_key, iv))
+}
+
+fn derive_key(num_cycles_power: u8, salt: &[u8], password: &[u8]) -> [u8; 32] {
+    let mut sha = sha2::Sha256::default();
+    let mut extra = [0u8; 8];
+    for _ in 0..(1u32 << num_cycles_power) {
+        sha.update(salt);
+        sha.update(password);
+        sha.update(extra);
+        for item in &mut extra {
+            *item = item.wrapping_add(1);
+            if *item != 0 {
+                break;
+            }
+        }
+    }
+    sha.finalize().into()
+}
+
+/// Cache last derived key.
+fn derive_key_cached(num_cycles_power: u8, salt: &[u8], password: &[u8]) -> [u8; 32] {
+    static KEY_CACHE: std::sync::Mutex<Option<([u8; 32], [u8; 32])>> = std::sync::Mutex::new(None);
+
+    let fingerprint: [u8; 32] = {
+        let mut sha = sha2::Sha256::default();
+        sha.update([num_cycles_power, salt.len() as u8]);
+        sha.update(salt);
+        sha.update(password);
+        sha.finalize().into()
+    };
+    if let Some(key) = KEY_CACHE
+        .lock()
+        .unwrap()
+        .as_ref()
+        .and_then(|(cached_fp, key)| (*cached_fp == fingerprint).then_some(*key))
+    {
+        return key;
+    }
+
+    let key = derive_key(num_cycles_power, salt, password);
+    *KEY_CACHE.lock().unwrap() = Some((fingerprint, key));
+    key
 }
 
 struct Cipher {
@@ -330,6 +359,45 @@ impl<W: Write> Write for Aes256Sha256Encoder<W> {
             self.buffer.clear();
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod key_derivation_tests {
+    use super::*;
+
+    const CYCLES: u8 = 4;
+
+    #[test]
+    fn cached_derivation_matches_reference() {
+        let (salt, password) = (b"salt".as_slice(), b"p\0a\0s\0s\0".as_slice());
+        let expected = derive_key(CYCLES, salt, password);
+        assert_eq!(derive_key_cached(CYCLES, salt, password), expected);
+        assert_eq!(derive_key_cached(CYCLES, salt, password), expected);
+    }
+
+    #[test]
+    fn cache_never_crosses_inputs() {
+        let a = (b"salt-a".as_slice(), b"pw-a".as_slice());
+        let b = (b"salt-a".as_slice(), b"pw-b".as_slice());
+        let c = (b"salt-c".as_slice(), b"pw-a".as_slice());
+        let ka = derive_key(CYCLES, a.0, a.1);
+        let kb = derive_key(CYCLES, b.0, b.1);
+        let kc = derive_key(CYCLES, c.0, c.1);
+        assert_eq!(derive_key_cached(CYCLES, a.0, a.1), ka);
+        assert_eq!(derive_key_cached(CYCLES, b.0, b.1), kb);
+        assert_eq!(derive_key_cached(CYCLES, a.0, a.1), ka);
+        assert_eq!(derive_key_cached(CYCLES, c.0, c.1), kc);
+        assert_eq!(derive_key_cached(CYCLES, b.0, b.1), kb);
+    }
+
+    #[test]
+    fn cycle_count_is_part_of_the_identity() {
+        let (salt, password) = (b"salt".as_slice(), b"pw".as_slice());
+        let k4 = derive_key_cached(4, salt, password);
+        let k5 = derive_key_cached(5, salt, password);
+        assert_ne!(k4, k5);
+        assert_eq!(derive_key_cached(4, salt, password), k4);
     }
 }
 
