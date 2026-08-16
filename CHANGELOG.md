@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.21.5 - 2026-08-16
+
 ### Changed
 
+- Bumped `lzma_rust2` to 0.19.
 - Batch AES-CBC decryption to improve performance.
 
 ## 0.21.4 - 2026-08-01
