@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Unreleased
 
+## 0.22.0 - 2026-08-23
+
+### Changed
+
+- Bumped `lzma_rust2` to 0.20.
+- Expose coder's properties (#131, thanks @lukr54)
+- Let a solid pack be compressed away from the writer (#132, thanks @lukr54)
+
 ## 0.21.5 - 2026-08-16
 
 ### Changed

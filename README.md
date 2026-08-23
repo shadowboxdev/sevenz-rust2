@@ -9,36 +9,36 @@ This is a fork of the original, unmaintained sevenz-rust crate to continue the d
 
 | Codec       | Decompression | Compression |
 |-------------|---------------|-------------|
-| COPY        | ✓             | ✓           |
-| LZMA        | ✓             | ✓           |
-| LZMA2       | ✓             | ✓           |
-| BROTLI (*)  | ✓             | ✓           |
-| BZIP2       | ✓             | ✓           |
-| DEFLATE (*) | ✓             | ✓           |
-| PPMD        | ✓             | ✓           |
-| LZ4 (*)     | ✓             | ✓           |
-| ZSTD (*)    | ✓             | ✓           |
+| COPY        | ✓            | ✓          |
+| LZMA        | ✓            | ✓          |
+| LZMA2       | ✓            | ✓          |
+| BROTLI (*)  | ✓            | ✓          |
+| BZIP2       | ✓            | ✓          |
+| DEFLATE (*) | ✓            | ✓          |
+| PPMD        | ✓            | ✓          |
+| LZ4 (*)     | ✓            | ✓          |
+| ZSTD (*)    | ✓            | ✓          |
 
 (*) Require optional cargo feature.
 
 | Filter        | Decompression | Compression |
 |---------------|---------------|-------------|
-| BCJ X86       | ✓             | ✓           |
-| BCJ ARM       | ✓             | ✓           |
-| BCJ ARM64     | ✓             | ✓           |
-| BCJ ARM_THUMB | ✓             | ✓           |
-| BCJ RISC_V    | ✓             | ✓           |
-| BCJ PPC       | ✓             | ✓           |
-| BCJ SPARC     | ✓             | ✓           |
-| BCJ IA64      | ✓             | ✓           |
-| BCJ2          | ✓             |             |
-| DELTA         | ✓             | ✓           |
+| BCJ X86       | ✓            | ✓          |
+| BCJ ARM       | ✓            | ✓          |
+| BCJ ARM64     | ✓            | ✓          |
+| BCJ ARM_THUMB | ✓            | ✓          |
+| BCJ RISC_V    | ✓            | ✓          |
+| BCJ PPC       | ✓            | ✓          |
+| BCJ SPARC     | ✓            | ✓          |
+| BCJ IA64      | ✓            | ✓          |
+| BCJ2          | ✓            |             |
+| DELTA         | ✓            | ✓          |
 
 ### Usage
 
 ```toml
 [dependencies]
-sevenz-rust2 = { version = "0.20" }
+sevenz-rust2 = { version = "0.22" }
 ```
 
 Decompress source file "data/sample.7z" to destination path "data/sample":
@@ -104,8 +104,8 @@ writer.finish().expect("compress ok");
 
 ### WASM support
 
-WASM is supported, but you can't use the default features. We provide a "default_wasm" feature that contains
-all default features with the needed changes to support WASM:
+WASM is supported, but you can't use the default features. We provide a "default_wasm" feature that contains all default
+features with the needed changes to support WASM:
 
 ```bash
 RUSTFLAGS='--cfg getrandom_backend="wasm_js"' cargo build --target wasm32-unknown-unknown --no-default-features --features=default_wasm
