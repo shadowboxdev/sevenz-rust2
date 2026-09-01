@@ -215,7 +215,13 @@ fn configured_file_count_limit_is_checked_before_allocation() {
     .err()
     .expect("declared file count must be rejected");
 
-    assert!(error.to_string().contains("configured limit (1)"));
+    assert!(matches!(
+        error,
+        sevenz_rust2::Error::MaxFilesLimited {
+            max_files: 1,
+            actual_files: 2,
+        }
+    ));
 }
 
 #[test]

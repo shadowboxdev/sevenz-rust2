@@ -43,6 +43,13 @@ pub enum Error {
         /// Actual required memory in KB.
         actaul_kb: usize,
     },
+    /// Declared archive file count exceeds the configured bound.
+    MaxFilesLimited {
+        /// Maximum allowed number of declared files.
+        max_files: usize,
+        /// Actual number of declared files.
+        actual_files: usize,
+    },
     /// Password required for encrypted archive.
     PasswordRequired,
     /// Feature or operation not supported.

@@ -667,9 +667,10 @@ impl Archive {
     ) -> Result<(), Error> {
         let num_files = bounded_count(read_variable_u64(header)?, limit, "num files")?;
         if num_files > max_files {
-            return Err(Error::other(format!(
-                "num files ({num_files}) exceeds the configured limit ({max_files})"
-            )));
+            return Err(Error::MaxFilesLimited {
+                max_files,
+                actual_files: num_files,
+            });
         }
         let mut files: Vec<ArchiveEntry> = budget.vec(num_files)?;
 
