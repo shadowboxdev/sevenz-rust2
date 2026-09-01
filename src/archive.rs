@@ -57,6 +57,7 @@ pub struct Archive {
     pub stream_map: StreamMap,
     /// Whether this is a solid archive (better compression, slower random access).
     pub is_solid: bool,
+    pub(crate) header_peak_memory_usage_bytes: usize,
 }
 
 impl Archive {
@@ -77,16 +78,102 @@ impl Archive {
     /// Blocks are decoded sequentially, while coders within one block form a live decoder chain.
     pub fn decoder_memory_usage_kb(&self) -> Result<usize, Error> {
         self.blocks.iter().try_fold(0, |archive_max, block| {
-            let block_total =
-                block
-                    .ordered_coder_iter()
-                    .try_fold(0_usize, |total, (_, coder)| {
-                        total
-                            .checked_add(decoder_memory_usage_kb(coder)?)
-                            .ok_or_else(|| Error::other("decoder memory usage overflow"))
-                    })?;
+            let block_total = block_decoder_memory_usage_kb(block)?;
             Ok(archive_max.max(block_total))
         })
+    }
+
+    /// Returns the heap memory retained by parsed archive metadata, in bytes.
+    ///
+    /// The result uses the actual capacities of the archive's vectors and strings so callers can
+    /// combine retained metadata with decoder and application working memory under one ceiling.
+    pub fn metadata_memory_usage_bytes(&self) -> usize {
+        let mut bytes = allocation_bytes::<u64>(&self.pack_sizes)
+            .saturating_add(self.pack_crcs_defined.allocation_bytes())
+            .saturating_add(allocation_bytes::<u64>(&self.pack_crcs))
+            .saturating_add(allocation_bytes::<Block>(&self.blocks))
+            .saturating_add(allocation_bytes::<ArchiveEntry>(&self.files))
+            .saturating_add(allocation_bytes::<usize>(
+                &self.stream_map.block_first_pack_stream_index,
+            ))
+            .saturating_add(allocation_bytes::<u64>(
+                &self.stream_map.pack_stream_offsets,
+            ))
+            .saturating_add(allocation_bytes::<usize>(
+                &self.stream_map.block_first_file_index,
+            ))
+            .saturating_add(allocation_bytes::<Option<usize>>(
+                &self.stream_map.file_block_index,
+            ));
+        if let Some(sub_streams) = &self.sub_streams_info {
+            bytes = bytes
+                .saturating_add(allocation_bytes::<u64>(&sub_streams.unpack_sizes))
+                .saturating_add(sub_streams.has_crc.allocation_bytes())
+                .saturating_add(allocation_bytes::<u64>(&sub_streams.crcs));
+        }
+        for block in &self.blocks {
+            bytes = bytes
+                .saturating_add(allocation_bytes::<Coder>(&block.coders))
+                .saturating_add(allocation_bytes::<BindPair>(&block.bind_pairs))
+                .saturating_add(allocation_bytes::<u64>(&block.packed_streams))
+                .saturating_add(allocation_bytes::<u64>(&block.unpack_sizes));
+            for coder in &block.coders {
+                bytes = bytes.saturating_add(coder.properties.capacity());
+            }
+        }
+        self.files.iter().fold(bytes, |total, entry| {
+            total.saturating_add(entry.name.capacity())
+        })
+    }
+
+    /// Returns the conservative peak bytes charged while parsing the archive header.
+    pub fn header_peak_memory_usage_bytes(&self) -> usize {
+        self.header_peak_memory_usage_bytes
+    }
+}
+
+fn allocation_bytes<T>(values: &Vec<T>) -> usize {
+    values.capacity().saturating_mul(std::mem::size_of::<T>())
+}
+
+pub(crate) fn block_decoder_memory_usage_kb(block: &Block) -> Result<usize, Error> {
+    block.coders.iter().try_fold(0_usize, |total, coder| {
+        total
+            .checked_add(decoder_memory_usage_kb(coder)?)
+            .ok_or_else(|| Error::other("decoder memory usage overflow"))
+    })
+}
+
+#[cfg(test)]
+mod decoder_memory_tests {
+    use super::*;
+
+    fn lzma2_coder(dictionary_property: u8) -> Coder {
+        let mut coder = Coder::default();
+        coder.id_size = EncoderMethod::ID_LZMA2.len();
+        coder.num_in_streams = 1;
+        coder.num_out_streams = 1;
+        coder.properties = vec![dictionary_property];
+        coder
+            .decompression_method_id_mut()
+            .copy_from_slice(EncoderMethod::ID_LZMA2);
+        coder
+    }
+
+    #[test]
+    fn decoder_memory_sums_all_live_branches_in_a_block() {
+        let branch = lzma2_coder(16);
+        let branch_kb = decoder_memory_usage_kb(&branch).unwrap();
+        let archive = Archive {
+            blocks: vec![Block {
+                // BCJ2-style multi-stream folders construct all branch decoders together.
+                coders: vec![branch.clone(), branch.clone(), branch],
+                ..Block::default()
+            }],
+            ..Archive::default()
+        };
+
+        assert_eq!(archive.decoder_memory_usage_kb().unwrap(), branch_kb * 3);
     }
 }
 

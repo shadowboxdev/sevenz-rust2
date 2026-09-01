@@ -4,7 +4,7 @@
 
 use std::io::Cursor;
 
-use sevenz_rust2::{ArchiveEntry, ArchiveReader, ArchiveWriter, Password, decompress};
+use sevenz_rust2::{ArchiveEntry, ArchiveReader, ArchiveWriter, Error, Password, decompress};
 use tempfile::tempdir;
 
 /// Builds a valid single-file archive whose only entry has the given (attacker-chosen) name.
@@ -201,6 +201,34 @@ fn oversized_num_files_is_rejected() {
         open_err(&raw_7z_exact(&nh)).is_err(),
         "an oversized num_files must be rejected"
     );
+}
+
+#[test]
+fn configured_file_count_limit_is_checked_before_allocation() {
+    let nh = [K_HEADER, K_FILES_INFO, 0x02, K_END, K_END];
+    let error = ArchiveReader::new_with_limits(
+        Cursor::new(raw_7z_exact(&nh)),
+        Password::empty(),
+        usize::MAX / 1024,
+        1,
+    )
+    .err()
+    .expect("declared file count must be rejected");
+
+    assert!(error.to_string().contains("configured limit (1)"));
+}
+
+#[test]
+fn cumulative_header_metadata_is_checked_before_allocation() {
+    let mut nh = vec![K_HEADER, K_FILES_INFO, 0x10, K_DUMMY, 0x40];
+    nh.extend_from_slice(&[0; 64]);
+    nh.extend_from_slice(&[K_END, K_END]);
+    let error =
+        ArchiveReader::new_with_limits(Cursor::new(raw_7z_exact(&nh)), Password::empty(), 1, 16)
+            .err()
+            .expect("metadata larger than one KiB must be rejected");
+
+    assert!(matches!(error, Error::MaxMemLimited { .. }));
 }
 
 /// A coder declaring an astronomically large properties size must be rejected before the

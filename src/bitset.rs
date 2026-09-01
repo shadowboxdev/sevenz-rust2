@@ -21,10 +21,31 @@ impl BitSet {
     }
 
     /// Returns a new [`BitSet`] with the initial capacity for `count` elements.
+    #[cfg(feature = "compress")]
     pub(crate) fn with_capacity(bit_count: usize) -> Self {
         let num_blocks = Self::blocks_for_bits(bit_count);
         let bits = vec![0; num_blocks];
         Self { bits, bit_count }
+    }
+
+    pub(crate) fn try_with_capacity(
+        bit_count: usize,
+    ) -> Result<Self, std::collections::TryReserveError> {
+        let num_blocks = Self::blocks_for_bits(bit_count);
+        let mut bits = Vec::new();
+        bits.try_reserve_exact(num_blocks)?;
+        bits.resize(num_blocks, 0);
+        Ok(Self { bits, bit_count })
+    }
+
+    pub(crate) fn storage_bytes(bit_count: usize) -> Option<usize> {
+        Self::blocks_for_bits(bit_count).checked_mul(std::mem::size_of::<usize>())
+    }
+
+    pub(crate) fn allocation_bytes(&self) -> usize {
+        self.bits
+            .capacity()
+            .saturating_mul(std::mem::size_of::<usize>())
     }
 
     /// Returns the number of set bits in this set.
@@ -112,21 +133,6 @@ impl BitSet {
 
         self.bit_count = new_len;
     }
-
-    /// Reserves the minimum capacity for the given `BitSet` to contain `count` distinct elements.
-    pub(crate) fn reserve_len_exact(&mut self, count: usize) {
-        if count > self.bit_count {
-            let new_num_blocks = Self::blocks_for_bits(count);
-            let old_num_blocks = self.bits.len();
-
-            if new_num_blocks > old_num_blocks {
-                self.bits.reserve_exact(new_num_blocks - old_num_blocks);
-                self.bits.resize(new_num_blocks, 0);
-            }
-
-            self.bit_count = count;
-        }
-    }
 }
 
 impl Default for BitSet {
@@ -195,6 +201,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "compress")]
     fn test_bitset_with_capacity() {
         let mut bs = BitSet::with_capacity(100);
         assert_eq!(bs.len(), 0);
