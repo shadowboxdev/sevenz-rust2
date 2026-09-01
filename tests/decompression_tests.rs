@@ -90,6 +90,22 @@ fn archive_reports_lzma_decoder_memory() {
     assert!(archive.decoder_memory_usage_kb().unwrap() > 1);
 }
 
+#[test]
+fn archive_reader_stops_after_callback_returns_false() {
+    let file = File::open("tests/resources/non_solid.7z").unwrap();
+    let mut reader = ArchiveReader::new(file, Password::empty()).unwrap();
+    let mut visited = 0;
+
+    reader
+        .for_each_entries(|_, _| {
+            visited += 1;
+            Ok(false)
+        })
+        .unwrap();
+
+    assert_eq!(visited, 1);
+}
+
 #[cfg(feature = "util")]
 #[test]
 fn decompress_lzma2_bcj_x86_file() {

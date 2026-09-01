@@ -1731,7 +1731,9 @@ impl<R: Read + Seek> ArchiveReader<R> {
                 &mut self.source,
                 self.max_mem_limit_kb,
             );
-            forder_dec.for_each_entries(&mut each)?;
+            if !forder_dec.for_each_entries(&mut each)? {
+                return Ok(());
+            }
         }
         // decode empty files
         for file_index in 0..self.archive.files.len() {
