@@ -1,6 +1,6 @@
 #[cfg(feature = "compress")]
 use crate::encoder_options::EncoderOptions;
-use crate::{NtTime, bitset::BitSet, block::*};
+use crate::{NtTime, bitset::BitSet, block::*, decoder::decoder_memory_usage_kb, error::Error};
 
 /// Size of the 7z signature header in bytes (32 bytes).
 /// This is needed for calculating absolute byte offsets within the archive.
@@ -70,6 +70,23 @@ impl Archive {
     /// Used for calculating byte ranges when streaming.
     pub fn pack_sizes(&self) -> &[u64] {
         &self.pack_sizes
+    }
+
+    /// Returns the maximum single-threaded decoder working memory required by one block, in KiB.
+    ///
+    /// Blocks are decoded sequentially, while coders within one block form a live decoder chain.
+    pub fn decoder_memory_usage_kb(&self) -> Result<usize, Error> {
+        self.blocks.iter().try_fold(0, |archive_max, block| {
+            let block_total =
+                block
+                    .ordered_coder_iter()
+                    .try_fold(0_usize, |total, (_, coder)| {
+                        total
+                            .checked_add(decoder_memory_usage_kb(coder)?)
+                            .ok_or_else(|| Error::other("decoder memory usage overflow"))
+                    })?;
+            Ok(archive_max.max(block_total))
+        })
     }
 }
 
