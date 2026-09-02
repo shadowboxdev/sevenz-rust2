@@ -7,7 +7,7 @@ use std::{
 
 #[cfg(feature = "util")]
 use sevenz_rust2::decompress_file;
-use sevenz_rust2::{Archive, ArchiveReader, BlockDecoder, Password};
+use sevenz_rust2::{Archive, ArchiveReader, BlockDecoder, Error, Password};
 #[cfg(feature = "util")]
 use tempfile::tempdir;
 
@@ -57,6 +57,75 @@ fn decompress_lzma_single_file_unencoded_header() {
     decompress_file(source_file, target).unwrap();
 
     assert_eq!(read_to_string(file1_path).unwrap(), "this is a file\n");
+}
+
+#[test]
+fn archive_reader_rejects_headers_above_memory_limit() {
+    let file = File::open("tests/resources/single_empty_file.7z").unwrap();
+
+    let result = ArchiveReader::new_with_memory_limit(file, Password::empty(), 0);
+
+    assert!(matches!(result, Err(Error::MaxMemLimited { .. })));
+}
+
+#[test]
+fn archive_reader_rejects_lzma_decoder_above_memory_limit() {
+    let file = File::open("tests/resources/single_file_with_content_lzma.7z").unwrap();
+    let mut reader = ArchiveReader::new(file, Password::empty()).unwrap();
+    reader.set_memory_limit_kb(1);
+
+    let result = reader.for_each_entries(|_, entry| {
+        std::io::copy(entry, &mut std::io::sink())?;
+        Ok(true)
+    });
+
+    assert!(matches!(result, Err(Error::MaxMemLimited { .. })));
+}
+
+#[test]
+fn archive_reports_lzma_decoder_memory() {
+    let mut file = File::open("tests/resources/single_file_with_content_lzma.7z").unwrap();
+    let archive = Archive::read(&mut file, &Password::empty()).unwrap();
+
+    assert!(archive.decoder_memory_usage_kb().unwrap() > 1);
+    assert!(archive.metadata_memory_usage_bytes() > 0);
+    assert!(archive.header_peak_memory_usage_bytes() >= archive.metadata_memory_usage_bytes());
+}
+
+#[test]
+fn encoded_header_cumulative_peak_is_enforced() {
+    let path = "tests/resources/two_files_with_content_lzma.7z";
+    let archive = ArchiveReader::new(File::open(path).unwrap(), Password::empty()).unwrap();
+    let peak_kb = archive
+        .archive()
+        .header_peak_memory_usage_bytes()
+        .div_ceil(1024);
+    assert!(peak_kb > 0);
+
+    let error = ArchiveReader::new_with_memory_limit(
+        File::open(path).unwrap(),
+        Password::empty(),
+        peak_kb - 1,
+    )
+    .err()
+    .expect("the encoded-header cumulative peak must be rejected");
+    assert!(matches!(error, Error::MaxMemLimited { .. }));
+}
+
+#[test]
+fn archive_reader_stops_after_callback_returns_false() {
+    let file = File::open("tests/resources/non_solid.7z").unwrap();
+    let mut reader = ArchiveReader::new(file, Password::empty()).unwrap();
+    let mut visited = 0;
+
+    reader
+        .for_each_entries(|_, _| {
+            visited += 1;
+            Ok(false)
+        })
+        .unwrap();
+
+    assert_eq!(visited, 1);
 }
 
 #[cfg(feature = "util")]

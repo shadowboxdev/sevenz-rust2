@@ -7,7 +7,7 @@ use flate2::bufread::DeflateDecoder;
 use lzma_rust2::{
     Lzma2Reader, Lzma2ReaderMt, LzmaReader,
     filter::{bcj::BcjReader, delta::DeltaReader},
-    lzma2_get_memory_usage,
+    lzma_get_memory_usage_by_props, lzma2_get_memory_usage,
 };
 #[cfg(feature = "ppmd")]
 use ppmd_rust::{
@@ -99,6 +99,15 @@ pub fn add_decoder<I: Read>(
             }
             let dict_size = get_lzma_dic_size(coder)?;
             let props = coder.properties[0];
+            let mem_size = lzma_get_memory_usage_by_props(dict_size, props)
+                .map_err(|e| Error::bad_password(e, !password.is_empty()))?
+                as usize;
+            if mem_size > max_mem_limit_kb {
+                return Err(Error::MaxMemLimited {
+                    max_kb: max_mem_limit_kb,
+                    actaul_kb: mem_size,
+                });
+            }
             let lz =
                 LzmaReader::new_with_props(input, uncompressed_len as _, props, dict_size, None)
                     .map_err(|e| Error::bad_password(e, !password.is_empty()))?;
@@ -206,6 +215,29 @@ pub fn add_decoder<I: Read>(
         _ => Err(Error::UnsupportedCompressionMethod(
             method.name().to_string(),
         )),
+    }
+}
+
+pub(crate) fn decoder_memory_usage_kb(coder: &Coder) -> Result<usize, Error> {
+    let method = EncoderMethod::by_id(coder.encoder_method_id()).ok_or_else(|| {
+        Error::UnsupportedCompressionMethod(format!("{:?}", coder.encoder_method_id()))
+    })?;
+    match method.id() {
+        EncoderMethod::ID_LZMA => {
+            if coder.properties.len() < 5 {
+                return Err(Error::Other("LZMA properties too short".into()));
+            }
+            lzma_get_memory_usage_by_props(get_lzma_dic_size(coder)?, coder.properties[0])
+                .map(|value| value as usize)
+                .map_err(|error| Error::io_msg(error, "invalid LZMA properties"))
+        }
+        EncoderMethod::ID_LZMA2 => Ok(lzma2_get_memory_usage(get_lzma2_dic_size(coder)?) as usize),
+        #[cfg(feature = "ppmd")]
+        EncoderMethod::ID_PPMD => {
+            let (_, bytes) = get_ppmd_order_memory_size(coder, usize::MAX)?;
+            Ok((bytes as usize).div_ceil(1024))
+        }
+        _ => Ok(0),
     }
 }
 
